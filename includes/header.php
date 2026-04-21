@@ -17,4 +17,4 @@
             <a href="/klinik.app/modules/antrean/index.php">Admin</a>
         </div>
     </div>
-    <div class="container">
+    <div class="container">.
