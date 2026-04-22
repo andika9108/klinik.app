@@ -6,36 +6,24 @@ $no_urut = "";
 
 if(isset($_POST['submit'])){
     try {
+        // Alamat cuma gabungan dari input Desa dan Kota sesuai permintaan lu
         $alamat_lengkap = "Desa/Kel. " . $_POST['desa'] . ", Kota/Kab. " . $_POST['kota'];
 
-        // 1. Simpan ke tabel pasien
+        // 1. Simpan data pasien
         $s1 = $conn->prepare("INSERT INTO pasien (nama_pasien, no_hp, alamat) VALUES (?,?,?)");
         $s1->execute([$_POST['nama'], $_POST['hp'], $alamat_lengkap]);
         $id_p = $conn->lastInsertId();
 
-        // 2. Ambil Nama Poli & Nomor Antrean Terakhir
-        // Kita butuh nama_poli buat dimasukin ke tabel antrean biar dashboard admin gak kosong
-        $s_poli = $conn->prepare("SELECT nama_poli FROM poli WHERE id_poli = ?");
-        $s_poli->execute([$_POST['poli']]);
-        $data_poli = $s_poli->fetch(PDO::FETCH_ASSOC);
-        $nama_poli_pilihan = $data_poli['nama_poli'];
-
+        // 2. AMBIL NOMOR TERAKHIR di Poli yang dipilih
         $s2 = $conn->prepare("SELECT MAX(no_urut) AS terakhir FROM antrean WHERE id_poli = ?");
         $s2->execute([$_POST['poli']]);
         $row = $s2->fetch(PDO::FETCH_ASSOC);
         
         $no_urut = ($row['terakhir'] != null) ? $row['terakhir'] + 1 : 1;
 
-        // 3. Masukkan ke tabel antrean (LENGKAPI SEMUA KOLOM)
-        // Kita tambahin nama_pasien, nama_poli, status, dan waktu biar dashboard admin "paham"
-        $s3 = $conn->prepare("INSERT INTO antrean (id_pasien, nama_pasien, nama_poli, no_urut, status, waktu) VALUES (?,?,?,?,?, NOW())");
-        $s3->execute([
-            $id_p, 
-            $_POST['nama'], 
-            $nama_poli_pilihan, 
-            $no_urut, 
-            'Menunggu' // Status awal wajib 'Menunggu' biar masuk kolom kiri
-        ]);
+        // 3. Masukkan ke tabel antrean
+        $s3 = $conn->prepare("INSERT INTO antrean (id_pasien, id_poli, no_urut) VALUES (?,?,?)");
+        $s3->execute([$id_p, $_POST['poli'], $no_urut]);
 
         $show_modal = true; 
     } catch(Exception $e) { 
