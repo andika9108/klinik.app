@@ -1,12 +1,14 @@
-/* Reset & Font */
+/* 1. RESET & BASE */
 * { box-sizing: border-box; margin: 0; padding: 0; }
+
 body { 
-    font-family: 'Segoe UI', sans-serif; 
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
     background-color: #f8fafc; 
     color: #333; 
+    line-height: 1.6;
 }
 
-/* Navbar (Biar gak ancur lagi) */
+/* 2. NAVBAR */
 .navbar { 
     background: #ffffff; 
     padding: 1rem 10%; 
@@ -14,41 +16,96 @@ body {
     justify-content: space-between; 
     align-items: center; 
     box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
 }
 .nav-brand { font-weight: bold; color: #0f52ba; font-size: 1.2rem; text-decoration: none; }
 .nav-links a { color: #666; text-decoration: none; margin-left: 20px; font-weight: 500; }
+.nav-links a:hover { color: #0f52ba; }
 
-/* Dashboard & Container */
-.container { max-width: 1000px; margin: 40px auto; padding: 0 20px; text-align: center; }
+/* 3. LAYOUT & CARD */
+.container { max-width: 1000px; margin: 40px auto; padding: 0 20px; }
 
-/* Form Card (Sesuai yang abang suka) */
-.form-container { max-width: 450px; margin: 40px auto; text-align: left; }
 .card { 
-    background: white; padding: 30px; border-radius: 15px; 
-    border: 1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.02); 
+    background: white; 
+    padding: 25px; 
+    border-radius: 15px; 
+    border: 1px solid #e2e8f0; 
+    box-shadow: 0 4px 6px rgba(0,0,0,0.02); 
+    margin-bottom: 20px;
 }
 
-/* Label & Input (Tegak Lurus & Berjarak) */
-.form-group { margin-bottom: 20px; display: block; }
+/* 4. FORM STYLING */
+.form-group { margin-bottom: 20px; text-align: left; }
 .form-group label { 
-    display: block !important; 
+    display: block; 
     font-weight: 600; 
     margin-bottom: 8px; 
+    color: #475569;
 }
 input, select, textarea { 
-    width: 100% !important; 
+    width: 100%; 
     padding: 12px; 
     border: 1px solid #cbd5e1; 
     border-radius: 10px; 
     font-size: 1rem;
-    display: block;
+    transition: border-color 0.2s;
 }
+input:focus { outline: none; border-color: #0f52ba; }
 
-/* Tombol Statis (Gak bakal goyang/timbul) */
+/* 5. TOMBOL (SOLID) */
 .btn { 
-    display: block; width: 100%; padding: 14px; border-radius: 10px; 
-    font-weight: 600; text-align: center; cursor: pointer; 
-    border: none; text-decoration: none; transition: none; transform: none !important;
+    display: inline-block; 
+    width: 100%; 
+    padding: 14px; 
+    border-radius: 10px; 
+    font-weight: 600; 
+    text-align: center; 
+    cursor: pointer; 
+    border: none; 
+    text-decoration: none;
 }
 .btn-primary { background: #0f52ba; color: white; }
 .btn-outline { background: #f1f5f9; color: #64748b; margin-top: 10px; }
+
+/* 6. CHAT MONITOR (PRO VERSION) */
+.chat-monitor {
+    height: 400px; 
+    overflow-y: auto; 
+    display: flex; 
+    flex-direction: column; 
+    gap: 12px; 
+    padding: 20px; 
+    background: #fdfdfd; /* Warna background chat lebih soft */
+}
+
+/* Bikin Scrollbar biar cantik di Chrome/Edge */
+.chat-monitor::-webkit-scrollbar { width: 6px; }
+.chat-monitor::-webkit-scrollbar-track { background: #f1f1f1; }
+.chat-monitor::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+/* Bubble Chat */
+.bubble {
+    max-width: 80%;
+    padding: 12px 16px;
+    border-radius: 15px;
+    font-size: 0.95rem;
+    position: relative;
+    word-wrap: break-word;
+}
+
+.bubble-admin {
+    align-self: flex-end;
+    background: #0f52ba;
+    color: white;
+    border-bottom-right-radius: 2px;
+}
+
+.bubble-other {
+    align-self: flex-start;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    color: #1e293b;
+    border-bottom-left-radius: 2px;
+}
