@@ -1,73 +1,74 @@
 <?php
-// 1. BACKEND LOGIC - STERIL TANPA SAMPAH
-ob_start(); 
+// 1. BACKEND LOGIC (PHP 5.6 Compatible)
 require_once __DIR__ . '/../../includes/connection.php';
 
 if (isset($_GET['action'])) {
     $action = $_GET['action'];
 
+    // API: Ambil Semua Data Antrean
     if ($action == 'ambil_antrean') {
-        $res = array('menunggu' => array(), 'dipanggil' => array(), 'selesai' => array());
-        
         try {
-            // Kita tarik semua kolom termasuk NO_URUT
-            $sql = "SELECT a.*, p.nama_pasien as nama_asli 
+            // Query mengambil data antrean, nama poli, dan nama pasien
+            // Diurutkan berdasarkan poli, lalu nomor urut terkecil (paling depan)
+            $sql = "SELECT a.*, p.nama_poli, ps.nama_pasien 
                     FROM antrean a 
-                    LEFT JOIN pasien p ON a.id_pasien = p.id_pasien 
-                    ORDER BY a.waktu ASC";
+                    LEFT JOIN poli p ON a.id_poli = p.id_poli 
+                    LEFT JOIN pasien ps ON a.id_pasien = ps.id_pasien
+                    ORDER BY a.id_poli ASC, a.no_urut ASC";
             $q = $conn->query($sql);
-            
-            while($r = $q->fetch()) {
-                $namaFix = !empty($r['nama_asli']) ? $r['nama_asli'] : (!empty($r['nama_pasien']) ? $r['nama_pasien'] : "Pasien #".$r['id']);
-                
-                $data = array(
-                    'id'      => $r['id'],
-                    'no_urut' => $r['no_urut'], // INI NOMOR ANTREANNYA
-                    'nama'    => htmlspecialchars($namaFix),
-                    'poli'    => htmlspecialchars($r['nama_poli'])
-                );
+        } catch (Exception $e) {
+            // Fallback jika terjadi error pada database
+            $q = $conn->query("SELECT *, 'Error' as nama_poli, 'Pasien' as nama_pasien FROM antrean ORDER BY id_antrean ASC");
+        }
+        
+        $res = array('menunggu' => array(), 'proses' => array(), 'selesai' => array());
 
-                $status = strtolower(trim($r['status']));
-                if ($status == 'dipanggil') {
-                    $res['dipanggil'][] = $data;
-                } elseif ($status == 'selesai') {
-                    $res['selesai'][] = $data;
-                } else {
-                    $res['menunggu'][] = $data;
-                }
+        while($r = $q->fetch()) {
+            $data = array(
+                'id'      => $r['id_antrean'],
+                'nama'    => htmlspecialchars($r['nama_pasien'] ?: 'Tanpa Nama'),
+                'poli'    => $r['nama_poli'] ?: 'Umum',
+                'no_urut' => $r['no_urut']
+            );
+
+            // Pengelompokan status (sesuai ENUM di DB: Menunggu, Proses, Selesai)
+            $s = strtolower($r['status']);
+            if ($s == 'proses') {
+                $res['proses'][] = $data;
+            } elseif ($s == 'selesai') {
+                $res['selesai'][] = $data;
+            } else {
+                $res['menunggu'][] = $data;
             }
-        } catch (Exception $e) { $res['error'] = $e->getMessage(); }
+        }
 
-        if (ob_get_length()) ob_end_clean(); 
         header('Content-Type: application/json');
         echo json_encode($res);
         exit;
     }
 
+    // API: Update Status Antrean
     if ($action == 'update_status' && isset($_POST['id'])) {
-        $stmt = $conn->prepare("UPDATE antrean SET status = ? WHERE id = ?");
+        $stmt = $conn->prepare("UPDATE antrean SET status = ? WHERE id_antrean = ?");
         $stmt->execute(array($_POST['status'], $_POST['id']));
-        if (ob_get_length()) ob_end_clean();
         echo json_encode(array('status' => 'success'));
         exit;
     }
 
+    // API: Ambil Chat
     if ($action == 'ambil_chat') {
         $chats = $conn->query("SELECT * FROM chat_konsultasi ORDER BY waktu ASC");
-        $html = "";
         while($c = $chats->fetch()) {
             $class = ($c['pengirim'] == 'admin') ? 'bubble-admin' : 'bubble-other';
-            $html .= "<div class='bubble $class'>".htmlspecialchars($c['pesan'])."</div>";
+            echo "<div class='bubble $class'>".htmlspecialchars($c['pesan'])."</div>";
         }
-        if (ob_get_length()) ob_end_clean();
-        echo $html;
         exit;
     }
 
+    // API: Kirim Chat
     if ($action == 'balas_chat' && isset($_POST['pesan_admin'])) {
         $stmt = $conn->prepare("INSERT INTO chat_konsultasi (pengirim, pesan) VALUES ('admin', ?)");
         $stmt->execute(array($_POST['pesan_admin']));
-        if (ob_get_length()) ob_end_clean();
         echo json_encode(array('status' => 'success'));
         exit;
     }
@@ -77,134 +78,160 @@ require_once __DIR__ . '/../../includes/header.php';
 ?>
 
 <style>
-    :root { --biru-pro: #0f52ba; --biru-gelap: #0a3d91; }
-    .wrapper-admin { max-width: 98%; margin: 20px auto; font-family: 'Segoe UI', sans-serif; }
-    
-    /* Grid Utama Gede */
-    .dashboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 25px; }
-    .card-admin { background: white; border-radius: 15px; border: 1px solid #e2e8f0; min-height: 600px; box-shadow: 0 5px 20px rgba(0,0,0,0.05); display: flex; flex-direction: column; overflow: hidden; }
-    
-    .head-biru { background: var(--biru-pro); color: white; padding: 22px; text-align: center; font-weight: 800; font-size: 1.2rem; text-transform: uppercase; letter-spacing: 1px; }
-    
-    /* Animasi Antrean Muncul */
-    @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-    
-    .pasien-item { 
-        padding: 20px; border-bottom: 1px solid #f1f5f9; 
-        display: flex; justify-content: space-between; align-items: center; 
-        animation: slideIn 0.3s ease-out;
+    :root { 
+        --primary: #0f52ba; 
+        --waiting: #94a3b8; 
+        --calling: #f59e0b; 
+        --done: #10b981; 
+        --bg: #f8fafc;
     }
+    .wrapper { max-width: 1200px; margin: 20px auto; padding: 0 15px; font-family: 'Segoe UI', sans-serif; }
     
-    /* Nomor Antrean Bulat Gede */
-    .no-bulat { 
-        background: #e0e7ff; color: var(--biru-pro); 
-        width: 50px; height: 50px; display: flex; 
-        align-items: center; justify-content: center; 
-        border-radius: 50%; font-weight: 900; font-size: 1.2rem; 
-        margin-right: 15px; border: 2px solid var(--biru-pro);
-    }
+    /* Layout 3 Kolom */
+    .grid-antrean { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+    
+    .col-card { background: white; border-radius: 12px; border: 1px solid #e2e8f0; min-height: 450px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+    .col-header { padding: 15px; color: white; font-weight: bold; text-align: center; border-radius: 11px 11px 0 0; font-size: 0.9rem; letter-spacing: 1px; }
+    
+    .patient-box { padding: 15px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; transition: 0.3s; }
+    .patient-box:hover { background: #fdfdfd; }
+    
+    .info b { display: block; font-size: 1rem; color: #1e293b; margin-bottom: 2px; }
+    .info span { font-size: 0.75rem; color: #64748b; font-weight: 700; text-transform: uppercase; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
 
-    .info-box { display: flex; align-items: center; }
-    .text-info b { display: block; font-size: 1.2rem; color: #1e293b; }
-    .text-info span { font-size: 0.8rem; color: #64748b; font-weight: bold; text-transform: uppercase; }
-
-    .btn-biru-pro { background: var(--biru-pro); color: white; border: none; padding: 12px 20px; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.2s; }
-    .btn-biru-pro:hover { background: var(--biru-gelap); transform: scale(1.05); }
-
+    .btn-act { border: none; padding: 10px 18px; border-radius: 8px; color: white; cursor: pointer; font-weight: bold; font-size: 0.8rem; transition: 0.2s; }
+    .btn-act:active { transform: translateY(2px); }
+    
     /* Chat Section */
-    .chat-container { background: white; border-radius: 15px; border: 1px solid #e2e8f0; box-shadow: 0 5px 20px rgba(0,0,0,0.05); overflow: hidden; }
-    .chat-area { height: 300px; overflow-y: auto; padding: 25px; background: #f8fafc; display: flex; flex-direction: column; gap: 12px; }
-    .bubble { max-width: 75%; padding: 12px 18px; border-radius: 18px; font-size: 1rem; }
-    .bubble-admin { align-self: flex-end; background: var(--biru-pro); color: white; border-bottom-right-radius: 2px; }
-    .bubble-other { align-self: flex-start; background: white; border: 1px solid #ddd; border-bottom-left-radius: 2px; }
-    .input-box { padding: 20px; display: flex; gap: 10px; background: white; border-top: 1px solid #eee; }
-    .input-box input { flex: 1; padding: 15px; border: 1px solid #ddd; border-radius: 12px; outline: none; }
+    .chat-card { background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; margin-top: 20px; }
+    .chat-box { height: 250px; overflow-y: auto; padding: 15px; background: var(--bg); display: flex; flex-direction: column; gap: 10px; }
+    .bubble { max-width: 80%; padding: 10px 15px; border-radius: 12px; font-size: 0.9rem; line-height: 1.4; }
+    .bubble-admin { align-self: flex-end; background: var(--primary); color: white; border-bottom-right-radius: 2px; }
+    .bubble-other { align-self: flex-start; background: white; border: 1px solid #e2e8f0; border-bottom-left-radius: 2px; }
+    
+    .input-area { padding: 15px; background: white; border-top: 1px solid #f1f5f9; display: flex; gap: 10px; }
+    .input-area input { flex: 1; padding: 12px; border: 1px solid #cbd5e1; border-radius: 10px; outline: none; }
 </style>
 
-<div class="wrapper-admin">
-    <div class="dashboard-grid">
-        <div class="card-admin">
-            <div class="head-biru">Menunggu</div>
-            <div id="box-menunggu"></div>
+<div class="wrapper">
+    <div style="text-align: center; margin-bottom: 25px;">
+        <h2 style="color: #1e293b; margin-bottom: 5px;">Manajemen Antrean Klinik</h2>
+        <p style="color: #64748b;">Pantau dan kelola urutan pasien secara real-time.</p>
+    </div>
+
+    <div class="grid-antrean">
+        <div class="col-card">
+            <div class="col-header" style="background: var(--waiting);">MENUNGGU</div>
+            <div id="list-menunggu"></div>
         </div>
-        <div class="card-admin" style="border: 2px solid var(--biru-pro);">
-            <div class="head-biru" style="background: var(--biru-gelap);">Dipanggil</div>
-            <div id="box-dipanggil"></div>
+
+        <div class="col-card" style="border: 2px solid var(--calling); transform: scale(1.02);">
+            <div class="col-header" style="background: var(--calling);">SEDANG DIPANGGIL (PROSES)</div>
+            <div id="list-proses"></div>
         </div>
-        <div class="card-admin">
-            <div class="head-biru">Selesai</div>
-            <div id="box-selesai"></div>
+
+        <div class="col-card">
+            <div class="col-header" style="background: var(--done);">SELESAI</div>
+            <div id="list-selesai"></div>
         </div>
     </div>
 
-    <div class="chat-container">
-        <div class="head-biru" style="text-align: left; padding-left: 30px;">💬 Chat Konsultasi</div>
-        <div class="chat-area" id="screenChat"></div>
-        <div class="input-box">
-            <input type="text" id="msgAdmin" placeholder="Balas pasien..." onkeypress="if(event.key === 'Enter') kirim()">
-            <button onclick="kirim()" class="btn-biru-pro">Kirim</button>
+    <div class="chat-card">
+        <div class="col-header" style="background: var(--primary); text-align: left; display: flex; align-items: center; gap: 10px;">
+            <span style="width: 10px; height: 10px; background: #22c55e; border-radius: 50%;"></span>
+            Live Chat Admin
+        </div>
+        <div class="chat-box" id="chatMonitor"></div>
+        <div class="input-area">
+            <input type="text" id="msg" placeholder="Ketik balasan untuk pasien..." onkeypress="if(event.key === 'Enter') kirim()">
+            <button type="button" onclick="kirim()" style="background:var(--primary); color:white; border:none; padding:0 25px; border-radius:10px; font-weight:bold; cursor:pointer;">Kirim</button>
         </div>
     </div>
 </div>
 
 <script>
-    var api = 'index.php';
+    var currentPath = 'index.php';
 
-    function loadData() {
-        fetch(api + '?action=ambil_antrean').then(r => r.json()).then(data => {
-            render('box-menunggu', data.menunggu, 'Panggil', 'Dipanggil');
-            render('box-dipanggil', data.dipanggil, 'Selesai', 'Selesai');
-            render('box-selesai', data.selesai, '', '');
+    function loadAll() {
+        // 1. Ambil & Render Antrean
+        fetch(currentPath + '?action=ambil_antrean')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            // Render Kolom Menunggu (Tombol ke 'Proses')
+            renderList('list-menunggu', data.menunggu, 'Panggil/Proses', 'Proses', 'var(--primary)');
+            
+            // Render Kolom Proses (Tombol ke 'Selesai')
+            renderList('list-proses', data.proses, 'Selesaikan', 'Selesai', 'var(--done)');
+            
+            // Render Kolom Selesai (Hanya label)
+            renderList('list-selesai', data.selesai, '', '', '');
         });
 
-        fetch(api + '?action=ambil_chat').then(r => r.text()).then(html => {
-            var b = document.getElementById('screenChat');
-            var isDown = b.scrollHeight - b.clientHeight <= b.scrollTop + 60;
-            b.innerHTML = html;
-            if(isDown) b.scrollTop = b.scrollHeight;
+        // 2. Ambil & Render Chat
+        fetch(currentPath + '?action=ambil_chat')
+        .then(function(r) { return r.text(); })
+        .then(function(html) {
+            var box = document.getElementById('chatMonitor');
+            var isBottom = box.scrollHeight - box.clientHeight <= box.scrollTop + 50;
+            box.innerHTML = html;
+            if(isBottom) box.scrollTop = box.scrollHeight;
         });
     }
 
-    function render(target, list, label, next) {
-        var h = '';
-        if (list.length === 0) h = '<p style="text-align:center; color:#999; margin-top:50px;">Tidak ada antrean</p>';
-        for (var i = 0; i < list.length; i++) {
-            var p = list[i];
-            h += '<div class="pasien-item">';
-            h += '<div class="info-box">';
-            h += '<div class="no-bulat">'+p.no_urut+'</div>';
-            h += '<div class="text-info"><b>'+p.nama+'</b><span>'+p.poli+'</span></div>';
-            h += '</div>';
-            if (label !== '') {
-                h += '<button class="btn-biru-pro" onclick="upStatus('+p.id+', \''+next+'\')">'+label+'</button>';
-            } else {
-                h += '<b style="color:var(--biru-pro);">BERES ✓</b>';
-            }
-            h += '</div>';
+    function renderList(targetId, items, btnLabel, nextStatus, btnBg) {
+        var html = '';
+        if (items.length === 0) {
+            html = '<p style="text-align:center; color:#ccc; margin-top:50px; font-size:0.8rem;">Tidak ada antrean</p>';
         }
-        document.getElementById(target).innerHTML = h;
+        
+        for (var i = 0; i < items.length; i++) {
+            var p = items[i];
+            html += '<div class="patient-box">';
+            html += '   <div class="info">';
+            html += '       <b>#' + p.no_urut + ' - ' + p.nama + '</b>';
+            html += '       <span>' + p.poli + '</span>';
+            html += '   </div>';
+            
+            if (btnLabel !== '') {
+                html += '   <button class="btn-act" style="background:'+btnBg+'" onclick="updateStatus('+p.id+', \''+nextStatus+'\')">'+btnLabel+'</button>';
+            } else {
+                html += '   <small style="color:var(--done); font-weight:bold; font-size: 0.7rem;">SELESAI ✓</small>';
+            }
+            html += '</div>';
+        }
+        document.getElementById(targetId).innerHTML = html;
     }
 
-    function upStatus(id, s) {
-        fetch(api + '?action=update_status', {
+    function updateStatus(id, stat) {
+        // Mengirim update status ke backend via POST
+        fetch(currentPath + '?action=update_status', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'id=' + id + '&status=' + s
-        }).then(() => loadData());
+            body: 'id=' + id + '&status=' + stat
+        }).then(function() { 
+            loadAll(); // Langsung refresh data setelah update
+        });
     }
 
     function kirim() {
-        var i = document.getElementById('msgAdmin');
-        if(!i.value.trim()) return;
-        fetch(api + '?action=balas_chat', {
+        var inp = document.getElementById('msg');
+        if(!inp.value.trim()) return;
+        
+        fetch(currentPath + '?action=balas_chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'pesan_admin=' + encodeURIComponent(i.value.trim())
-        }).then(() => { i.value = ''; loadData(); });
+            body: 'pesan_admin=' + encodeURIComponent(inp.value.trim())
+        }).then(function() { 
+            inp.value = ''; 
+            loadAll(); 
+        });
     }
 
-    setInterval(loadData, 3000);
-    window.onload = loadData;
+    // Interval Auto-Refresh setiap 3 detik
+    setInterval(loadAll, 3000);
+    
+    // Load pertama kali saat halaman dibuka
+    window.onload = loadAll;
 </script>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>
