@@ -65,11 +65,74 @@ if (isset($_GET['action'])) {
         exit;
     }
 
-    // API: Kirim Chat
+    // API: Kirim Chat (Manual)
     if ($action == 'balas_chat' && isset($_POST['pesan_admin'])) {
         $stmt = $conn->prepare("INSERT INTO chat_konsultasi (pengirim, pesan) VALUES ('admin', ?)");
         $stmt->execute(array($_POST['pesan_admin']));
         echo json_encode(array('status' => 'success'));
+        exit;
+    }
+
+   // API: Balas Chat Pake Groq AI (Llama 3)
+    if ($action == 'balas_chat_ai') {
+        // --- 1. TARUH API KEY GROQ LU DI SINI ---
+        $apiKey = "#"; 
+        
+        $cek = $conn->query("SELECT pesan FROM chat_konsultasi WHERE pengirim != 'admin' ORDER BY id_chat DESC LIMIT 1");
+        $lastChat = $cek->fetch(PDO::FETCH_ASSOC);
+        $pesanPasien = $lastChat ? $lastChat['pesan'] : "Halo admin.";
+
+        $ch = curl_init("https://api.groq.com/openai/v1/chat/completions");
+        $systemPrompt = "Kamu adalah asisten admin klinik. Jawab pertanyaan dengan ramah, sopan, dan sangat singkat (maks 2 kalimat). Jangan beri diagnosa medis. Arahkan pasien daftar ke poli.";
+
+        $data = [
+            "model" => "llama3-70b-8192", 
+            "messages" => [
+                ["role" => "system", "content" => $systemPrompt],
+                ["role" => "user", "content" => $pesanPasien]
+            ]
+        ];
+
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            "Authorization: Bearer " . $apiKey,
+            "Content-Type: application/json"
+        ]);
+        
+        // --- INI OBATNYA BUAT XAMPP LU BIAR GAK REWEL ---
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        // ------------------------------------------------
+
+        $response = curl_exec($ch);
+        
+        // KALAU XAMPP/CURL-NYA YANG MOGOK, MUNCULIN ERRORNYA DI NETWORK
+        if(curl_errno($ch)){
+            $error_msg = curl_error($ch);
+            curl_close($ch);
+            header('HTTP/1.1 500 Internal Server Error');
+            echo json_encode(['status' => 'error', 'message' => 'cURL Error: ' . $error_msg]);
+            exit;
+        }
+        curl_close($ch);
+
+        $resJson = json_decode($response, true);
+        
+        // KALAU API KEY SALAH ATAU LIMIT ABIS, MUNCULIN ERRORNYA
+        if(isset($resJson['error'])) {
+            header('HTTP/1.1 500 Internal Server Error');
+            echo json_encode(['status' => 'error', 'message' => 'Groq API Error: ' . $resJson['error']['message']]);
+            exit;
+        }
+
+        $aiReply = isset($resJson['choices'][0]['message']['content']) ? trim($resJson['choices'][0]['message']['content']) : "Maaf, AI sedang offline.";
+
+        $stmt = $conn->prepare("INSERT INTO chat_konsultasi (pengirim, pesan) VALUES ('admin', ?)");
+        $stmt->execute(["✨ [AI]: " . $aiReply]);
+
+        echo json_encode(['status' => 'success']);
         exit;
     }
 }
@@ -137,14 +200,19 @@ require_once __DIR__ . '/../../includes/header.php';
     </div>
 
     <div class="chat-card">
-        <div class="col-header" style="background: var(--primary); text-align: left; display: flex; align-items: center; gap: 10px;">
-            <span style="width: 10px; height: 10px; background: #22c55e; border-radius: 50%;"></span>
-            Live Chat Admin
+        <div class="col-header" style="background: var(--primary); text-align: left; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="width: 10px; height: 10px; background: #22c55e; border-radius: 50%;"></span>
+                Live Chat Admin
+            </div>
+            <small style="color:#cbd5e1; font-weight:normal;">Powered by Groq AI</small>
         </div>
         <div class="chat-box" id="chatMonitor"></div>
+        
         <div class="input-area">
             <input type="text" id="msg" placeholder="Ketik balasan untuk pasien..." onkeypress="if(event.key === 'Enter') kirim()">
             <button type="button" onclick="kirim()" style="background:var(--primary); color:white; border:none; padding:0 25px; border-radius:10px; font-weight:bold; cursor:pointer;">Kirim</button>
+            <button type="button" onclick="kirimAI()" id="btn-ai" style="background:#8b5cf6; color:white; border:none; padding:0 20px; border-radius:10px; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:5px;">✨ Auto AI</button>
         </div>
     </div>
 </div>
@@ -157,13 +225,8 @@ require_once __DIR__ . '/../../includes/header.php';
         fetch(currentPath + '?action=ambil_antrean')
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            // Render Kolom Menunggu (Tombol ke 'Proses')
             renderList('list-menunggu', data.menunggu, 'Panggil/Proses', 'Proses', 'var(--primary)');
-            
-            // Render Kolom Proses (Tombol ke 'Selesai')
             renderList('list-proses', data.proses, 'Selesaikan', 'Selesai', 'var(--done)');
-            
-            // Render Kolom Selesai (Hanya label)
             renderList('list-selesai', data.selesai, '', '', '');
         });
 
@@ -203,13 +266,12 @@ require_once __DIR__ . '/../../includes/header.php';
     }
 
     function updateStatus(id, stat) {
-        // Mengirim update status ke backend via POST
         fetch(currentPath + '?action=update_status', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'id=' + id + '&status=' + stat
         }).then(function() { 
-            loadAll(); // Langsung refresh data setelah update
+            loadAll(); 
         });
     }
 
@@ -227,10 +289,35 @@ require_once __DIR__ . '/../../includes/header.php';
         });
     }
 
-    // Interval Auto-Refresh setiap 3 detik
+    // FUNGSI JAVASCRIPT UNTUK MANGGIL API AI
+    function kirimAI() {
+        var inp = document.getElementById('msg');
+        var btnAI = document.getElementById('btn-ai');
+        
+        inp.placeholder = "AI sedang berpikir...";
+        inp.disabled = true;
+        btnAI.innerHTML = "⏳ Wait...";
+        btnAI.style.opacity = "0.7";
+
+        fetch(currentPath + '?action=balas_chat_ai', {
+            method: 'POST'
+        }).then(function(r) { return r.json(); })
+        .then(function(data) {
+            inp.placeholder = "Ketik balasan untuk pasien...";
+            inp.disabled = false;
+            btnAI.innerHTML = "✨ Auto AI";
+            btnAI.style.opacity = "1";
+            loadAll(); // Langsung munculin chat dari AI
+        }).catch(function() {
+            alert("Gagal memanggil AI. Pastikan API Key benar dan ada koneksi internet.");
+            inp.placeholder = "Ketik balasan untuk pasien...";
+            inp.disabled = false;
+            btnAI.innerHTML = "✨ Auto AI";
+            btnAI.style.opacity = "1";
+        });
+    }
+
     setInterval(loadAll, 3000);
-    
-    // Load pertama kali saat halaman dibuka
     window.onload = loadAll;
 </script>
 
