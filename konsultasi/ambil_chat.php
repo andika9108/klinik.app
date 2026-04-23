@@ -1,15 +1,14 @@
 <?php
+// Cukup naik SATU tingkat saja
 require_once '../includes/connection.php';
 
-$query = $conn->query("SELECT * FROM chat_konsultasi ORDER BY waktu ASC");
-while ($row = $query->fetch()) {
-    $class = ($row['pengirim'] == 'admin') ? 'msg-admin' : 'msg-user';
-    $sender = ($row['pengirim'] == 'admin') ? 'Admin Klinik' : 'Anda';
-    
+// Pastikan pake id_chat sesuai struktur tabel lu
+$q = $conn->query("SELECT * FROM chat_konsultasi ORDER BY id_chat ASC");
+
+while ($r = $q->fetch()) {
+    $class = ($r['pengirim'] == 'pasien') ? 'msg-user' : 'msg-admin';
     echo '<div class="message ' . $class . '">';
-    echo '<small style="font-weight:bold; font-size:0.7rem; display:block;">' . $sender . '</small>';
-    echo htmlspecialchars($row['pesan']);
-    echo '<span class="time">' . date('H:i', strtotime($row['waktu'])) . '</span>';
+    echo htmlspecialchars($r['pesan']);
     echo '</div>';
 }
 ?>
