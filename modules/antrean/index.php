@@ -8,17 +8,25 @@ if (isset($_GET['action'])) {
     // API: Ambil Semua Data Antrean
     if ($action == 'ambil_antrean') {
         try {
-            // Query mengambil data antrean, nama poli, dan nama pasien
-            // Diurutkan berdasarkan poli, lalu nomor urut terkecil (paling depan)
+            // --- LOGIC PEMBERSIH OTOMATIS (Hanya untuk yang 'Selesai') ---
+            $conn->query("DELETE FROM antrean WHERE status = 'Selesai' AND id_antrean NOT IN (
+                SELECT id_antrean FROM (
+                    SELECT id_antrean FROM antrean 
+                    WHERE status = 'Selesai' 
+                    ORDER BY id_antrean DESC LIMIT 10
+                ) tmp
+            )");
+            // ------------------------------------------------------------
+
+            // URUTAN DIPERBAIKI: Utamakan nomor urut terkecil (no_urut) secara global
             $sql = "SELECT a.*, p.nama_poli, ps.nama_pasien 
                     FROM antrean a 
                     LEFT JOIN poli p ON a.id_poli = p.id_poli 
                     LEFT JOIN pasien ps ON a.id_pasien = ps.id_pasien
-                    ORDER BY a.id_poli ASC, a.no_urut ASC";
+                    ORDER BY a.no_urut ASC, a.id_poli ASC";
             $q = $conn->query($sql);
         } catch (Exception $e) {
-            // Fallback jika terjadi error pada database
-            $q = $conn->query("SELECT *, 'Error' as nama_poli, 'Pasien' as nama_pasien FROM antrean ORDER BY id_antrean ASC");
+            $q = $conn->query("SELECT *, 'Error' as nama_poli, 'Pasien' as nama_pasien FROM antrean ORDER BY no_urut ASC");
         }
         
         $res = array('menunggu' => array(), 'proses' => array(), 'selesai' => array());
@@ -31,12 +39,12 @@ if (isset($_GET['action'])) {
                 'no_urut' => $r['no_urut']
             );
 
-            // Pengelompokan status (sesuai ENUM di DB: Menunggu, Proses, Selesai)
             $s = strtolower($r['status']);
             if ($s == 'proses') {
                 $res['proses'][] = $data;
             } elseif ($s == 'selesai') {
-                $res['selesai'][] = $data;
+                // Pake array_unshift supaya yang nomornya gede (terbaru) muncul di paling atas kolom Selesai
+                array_unshift($res['selesai'], $data);
             } else {
                 $res['menunggu'][] = $data;
             }
@@ -73,9 +81,8 @@ if (isset($_GET['action'])) {
         exit;
     }
 
-   // API: Balas Chat Pake Groq AI (Llama 3)
+   // API: Balas Chat Pake Groq AI
     if ($action == 'balas_chat_ai') {
-        // --- 1. TARUH API KEY GROQ LU DI SINI ---
         $apiKey = "#"; 
         
         $cek = $conn->query("SELECT pesan FROM chat_konsultasi WHERE pengirim != 'admin' ORDER BY id_chat DESC LIMIT 1");
@@ -83,7 +90,7 @@ if (isset($_GET['action'])) {
         $pesanPasien = $lastChat ? $lastChat['pesan'] : "Halo admin.";
 
         $ch = curl_init("https://api.groq.com/openai/v1/chat/completions");
-        $systemPrompt = "Kamu adalah asisten admin klinik. Jawab pertanyaan dengan ramah, sopan, dan sangat singkat (maks 2 kalimat). Jangan beri diagnosa medis. Arahkan pasien daftar ke poli.";
+        $systemPrompt = "Kamu adalah asisten admin klinik. Jawab singkat maksimal 2 kalimat.";
 
         $data = [
             "model" => "llama3-70b-8192", 
@@ -101,32 +108,13 @@ if (isset($_GET['action'])) {
             "Content-Type: application/json"
         ]);
         
-        // --- INI OBATNYA BUAT XAMPP LU BIAR GAK REWEL ---
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
         curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-        // ------------------------------------------------
 
         $response = curl_exec($ch);
-        
-        // KALAU XAMPP/CURL-NYA YANG MOGOK, MUNCULIN ERRORNYA DI NETWORK
-        if(curl_errno($ch)){
-            $error_msg = curl_error($ch);
-            curl_close($ch);
-            header('HTTP/1.1 500 Internal Server Error');
-            echo json_encode(['status' => 'error', 'message' => 'cURL Error: ' . $error_msg]);
-            exit;
-        }
         curl_close($ch);
 
         $resJson = json_decode($response, true);
-        
-        // KALAU API KEY SALAH ATAU LIMIT ABIS, MUNCULIN ERRORNYA
-        if(isset($resJson['error'])) {
-            header('HTTP/1.1 500 Internal Server Error');
-            echo json_encode(['status' => 'error', 'message' => 'Groq API Error: ' . $resJson['error']['message']]);
-            exit;
-        }
-
         $aiReply = isset($resJson['choices'][0]['message']['content']) ? trim($resJson['choices'][0]['message']['content']) : "Maaf, AI sedang offline.";
 
         $stmt = $conn->prepare("INSERT INTO chat_konsultasi (pengirim, pesan) VALUES ('admin', ?)");
@@ -149,29 +137,19 @@ require_once __DIR__ . '/../../includes/header.php';
         --bg: #f8fafc;
     }
     .wrapper { max-width: 1200px; margin: 20px auto; padding: 0 15px; font-family: 'Segoe UI', sans-serif; }
-    
-    /* Layout 3 Kolom */
     .grid-antrean { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 30px; }
-    
     .col-card { background: white; border-radius: 12px; border: 1px solid #e2e8f0; min-height: 450px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
     .col-header { padding: 15px; color: white; font-weight: bold; text-align: center; border-radius: 11px 11px 0 0; font-size: 0.9rem; letter-spacing: 1px; }
-    
     .patient-box { padding: 15px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; transition: 0.3s; }
     .patient-box:hover { background: #fdfdfd; }
-    
     .info b { display: block; font-size: 1rem; color: #1e293b; margin-bottom: 2px; }
     .info span { font-size: 0.75rem; color: #64748b; font-weight: 700; text-transform: uppercase; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
-
     .btn-act { border: none; padding: 10px 18px; border-radius: 8px; color: white; cursor: pointer; font-weight: bold; font-size: 0.8rem; transition: 0.2s; }
-    .btn-act:active { transform: translateY(2px); }
-    
-    /* Chat Section */
     .chat-card { background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; margin-top: 20px; }
     .chat-box { height: 250px; overflow-y: auto; padding: 15px; background: var(--bg); display: flex; flex-direction: column; gap: 10px; }
-    .bubble { max-width: 80%; padding: 10px 15px; border-radius: 12px; font-size: 0.9rem; line-height: 1.4; }
-    .bubble-admin { align-self: flex-end; background: var(--primary); color: white; border-bottom-right-radius: 2px; }
-    .bubble-other { align-self: flex-start; background: white; border: 1px solid #e2e8f0; border-bottom-left-radius: 2px; }
-    
+    .bubble { max-width: 80%; padding: 10px 15px; border-radius: 12px; font-size: 0.9rem; }
+    .bubble-admin { align-self: flex-end; background: var(--primary); color: white; }
+    .bubble-other { align-self: flex-start; background: white; border: 1px solid #e2e8f0; }
     .input-area { padding: 15px; background: white; border-top: 1px solid #f1f5f9; display: flex; gap: 10px; }
     .input-area input { flex: 1; padding: 12px; border: 1px solid #cbd5e1; border-radius: 10px; outline: none; }
 </style>
@@ -221,7 +199,6 @@ require_once __DIR__ . '/../../includes/header.php';
     var currentPath = 'index.php';
 
     function loadAll() {
-        // 1. Ambil & Render Antrean
         fetch(currentPath + '?action=ambil_antrean')
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -230,7 +207,6 @@ require_once __DIR__ . '/../../includes/header.php';
             renderList('list-selesai', data.selesai, '', '', '');
         });
 
-        // 2. Ambil & Render Chat
         fetch(currentPath + '?action=ambil_chat')
         .then(function(r) { return r.text(); })
         .then(function(html) {
@@ -278,7 +254,6 @@ require_once __DIR__ . '/../../includes/header.php';
     function kirim() {
         var inp = document.getElementById('msg');
         if(!inp.value.trim()) return;
-        
         fetch(currentPath + '?action=balas_chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -289,33 +264,29 @@ require_once __DIR__ . '/../../includes/header.php';
         });
     }
 
-    // FUNGSI JAVASCRIPT UNTUK MANGGIL API AI
     function kirimAI() {
         var inp = document.getElementById('msg');
         var btnAI = document.getElementById('btn-ai');
-        
         inp.placeholder = "AI sedang berpikir...";
         inp.disabled = true;
         btnAI.innerHTML = "⏳ Wait...";
         btnAI.style.opacity = "0.7";
-
-        fetch(currentPath + '?action=balas_chat_ai', {
-            method: 'POST'
-        }).then(function(r) { return r.json(); })
+        fetch(currentPath + '?action=balas_chat_ai', { method: 'POST' })
+        .then(function(r) { return r.json(); })
         .then(function(data) {
             inp.placeholder = "Ketik balasan untuk pasien...";
             inp.disabled = false;
             btnAI.innerHTML = "✨ Auto AI";
             btnAI.style.opacity = "1";
-            loadAll(); // Langsung munculin chat dari AI
+            loadAll(); 
         }).catch(function() {
-            alert("Gagal memanggil AI. Pastikan API Key benar dan ada koneksi internet.");
+            alert("Gagal memanggil AI.");
             inp.placeholder = "Ketik balasan untuk pasien...";
             inp.disabled = false;
             btnAI.innerHTML = "✨ Auto AI";
             btnAI.style.opacity = "1";
         });
-    }
+    }  
 
     setInterval(loadAll, 3000);
     window.onload = loadAll;
